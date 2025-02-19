@@ -13,14 +13,14 @@ class BaseObjective(ABC):
         self.robot_model = robot_model
 
     @abstractmethod
-    def running_cost(self, state, inputs, reference):
+    def running_cost(self, state, inputs, reference, pred_input_ode):
         pass
 
     def final_cost(self, state, reference):
         return 0.0
 
-    def cost_and_constraints(self, state, inputs, reference):
-        return self.running_cost(state, inputs, reference) + self.make_barrier(self.constraints(state, inputs, reference))
+    def cost_and_constraints(self, state, inputs, reference, pred_input_ode):
+        return self.running_cost(state, inputs, reference, pred_input_ode) + self.make_barrier(self.constraints(state, inputs, reference))
 
     def final_cost_and_constraints(self, state, reference):
         return self.final_cost(state, reference) + self.make_barrier(self.terminal_constraints(state, reference))
@@ -134,11 +134,11 @@ class SamplingBasedMPC:
     def clip_input_single(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
-    @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
-    def rollout_all(self, initial_state, reference, control_variables):
-        return self.rollout_single(initial_state, reference, control_variables)
+    @partial(jax.vmap, in_axes=(None, None, None, None, 0), out_axes=(0, 0))
+    def rollout_all(self, initial_state, reference, pred_input_ode, control_variables):
+        return self.rollout_single(initial_state, reference, pred_input_ode, control_variables)
 
-    def rollout_single(self, initial_state, reference, control_variables):
+    def rollout_single(self, initial_state, reference, pred_input_ode, control_variables):
 
         cost = 0.0
         curr_state = initial_state
@@ -158,7 +158,7 @@ class SamplingBasedMPC:
         for idx in range(self.horizon):
             # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
             # changing the timestep and time horizon jointly
-            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
+            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :], pred_input_ode[idx, :])
             curr_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
             # rollout_states = rollout_states.at[idx+1, :].set(curr_state)
 
@@ -200,7 +200,7 @@ class SamplingBasedMPC:
 
         return cost, input_sequence
 
-    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains, pred_input_sde):
+    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains, pred_input_ode, pred_input_sde):
 
         additional_random_parameters = self.sample_input_sequence(key)
 
@@ -209,20 +209,7 @@ class SamplingBasedMPC:
             control_vars_all = control_vars_all.at[:, :, [0,1]].set(pred_input_sde)
         else:
             control_vars_all = best_control_vars + additional_random_parameters
-        # here add the input predicted
 
-        #x0 = jax.device_get(state.at[0,1]) # so che non da errori
-        #mean, samples = self._compute_samples(x0)
-
-        #samples = self.npde.sample(x00,self.t,self.config.MPC.num_parallel_computations)
-        #samples = self.sess.run(samples)
-        # ode
-        #path = self.npde.predict(x0,self.t)
-        #path = self.sess.run(path)
-
-        # ok, funziona!!
-        # 
-        #  
         # Do rollout
         if self.config.MPC.sensitivity:
             costs, control_vars_all = self.rollout_with_sensitivity(state, reference, control_vars_all, gains)
@@ -230,7 +217,8 @@ class SamplingBasedMPC:
             if self.compute_gains:
                 (costs, control_vars_all), gradients = self.rollout_sens_to_state(state, reference, control_vars_all)
             else:
-                costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)#NEED A LOT OF TIME
+                costs, control_vars_all = self.rollout_all(state, reference, pred_input_ode, control_vars_all)#NEED A LOT OF TIME
+                #HERE
 
         additional_random_parameters_clipped = control_vars_all - best_control_vars
 
@@ -298,7 +286,7 @@ class SamplingBasedMPC:
         # maybe this loop should be jitted to actually be more efficient
         pred_input_ode, pred_input_sde = self._compute_samples(self.last_input)
         for i in range(num_steps):
-            best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars, self.master_key, self.gains, pred_input_sde)
+            best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars, self.master_key, self.gains, pred_input_ode, pred_input_sde)
             self.gains = gains
             # Below are the gains computed using the full jax autodiff instead of the more efficient formula
             # print("old gains", self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key, self.gains)[0][0])

@@ -70,13 +70,14 @@ class Objective(BaseObjective): # OBJECTIVE/COST FUNCTION
         state_err = state[:] - state_ref[:]
         return state_err
     
-    def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32: # type: ignore
+    def running_cost(self, state: jnp.array, inputs: jnp.array, reference, pred_input_ode) -> jnp.float32: # type: ignore
+        input_human_cost = ((inputs[:2] - pred_input_ode)**2)*self.r_human
         state_err = self.compute_state_error(state, reference)
         th_err = self.th_bar - self.compute_current_th(state)
         cost = state_err.transpose() @ self.Q @ state_err 
         + inputs.transpose() @ self.R @ inputs 
         +(self.q_th**2)*th_err
-        #+  input_human_cost # inputs error with the npODE prediction
+        +  input_human_cost # inputs error with the npODE prediction
         #+ self.final_cost(state, reference)
         return cost
 
@@ -123,7 +124,7 @@ if __name__ == "__main__":
     data.set_from_config(config)
     data.set_file_name(FILE_NAME, DIRECTORY)
     data.set_reference(REFERENCE_POSITION)
-    print("questa versione funziona")
+
     print("Loading human model")
     npSde = load_model('npODEeSDE/npde_state_sde.pkl',sess)
     npOde = load_model('npODEeSDE/npde_state.pkl',sess)
