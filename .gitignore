@@ -1,0 +1,7 @@
+# Escludi la cartella virtual environment
+venv/
+
+# Escludi file specifici
+*.so
+*.pkl
+*.ckpt
