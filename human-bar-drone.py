@@ -35,6 +35,8 @@ STARTING_INPUT = jnp.array([0., 0., 0., 0.], dtype=jnp.float32) # this is really
 STARTING_POSITION = jnp.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.], dtype=jnp.float32) # i don't really know what it is. BUT IT IS NOT THE STARTING POSITION
 REFERENCE_POSITION =  Generator_feasible_desired_state(1, 2.5, -3, 60) #half_len of the bar[m], x[m], y[m], theta[deg]
 SIM_TIME = 1 # seconds
+DT = 0.02
+TIME_HORIZON = 30
 FILE_NAME = "some_sim"
 DIRECTORY = 'SIMULATION_DATA'
 
@@ -45,6 +47,7 @@ class Objective(BaseObjective): # OBJECTIVE/COST FUNCTION
         self.R = jnp.diag(jnp.array([10, 10, 10, 10]))
         self.Qf = jnp.diag(jnp.array([1000., 1000., 0., 1000., 1000., 0., 1000., 1000., 0., 1000., 1000., 0.]))
         self.q_th = 3000 # 1000
+        self.r_human = 3000
         self.x_bar = -(reference[0] - reference[3])
         self.y_bar = -(reference[1] - reference[4])
         self.th_bar = math.atan2(self.y_bar, self.x_bar)
@@ -70,7 +73,12 @@ class Objective(BaseObjective): # OBJECTIVE/COST FUNCTION
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32: # type: ignore
         state_err = self.compute_state_error(state, reference)
         th_err = self.th_bar - self.compute_current_th(state)
-        return state_err.transpose() @ self.Q @ state_err + inputs.transpose() @ self.R @ inputs +(self.q_th^2)*th_err#+ self.final_cost(state, reference)
+        cost = state_err.transpose() @ self.Q @ state_err 
+        + inputs.transpose() @ self.R @ inputs 
+        +(self.q_th**2)*th_err
+        #+  input_human_cost # inputs error with the npODE prediction
+        #+ self.final_cost(state, reference)
+        return cost
 
     def final_cost(self, state, reference):
         state_err = self.compute_state_error(state, reference)
@@ -92,8 +100,8 @@ if __name__ == "__main__":
     config = settings.Config(robot_config)
 
     config.general.visualize = True
-    config.MPC.dt = 0.02 # SAMPLING TIME you also need to change the sampling time in the MUJOCO FILE
-    config.MPC.horizon = 25 #TIME HORIZON
+    config.MPC.dt = DT # SAMPLING TIME you also need to change the sampling time in the MUJOCO FILE
+    config.MPC.horizon = TIME_HORIZON #TIME HORIZON
     config.MPC.std_dev_mppi = jnp.array([5, 5, 5, 5])
     config.MPC.num_parallel_computations = 100
     config.MPC.initial_guess = STARTING_INPUT # STARTING INPUT???
@@ -115,16 +123,16 @@ if __name__ == "__main__":
     data.set_from_config(config)
     data.set_file_name(FILE_NAME, DIRECTORY)
     data.set_reference(REFERENCE_POSITION)
-
+    print("questa versione funziona")
     print("Loading human model")
-    npde = load_model('npODEeSDE/npde_state_sde.pkl',sess)
-
+    npSde = load_model('npODEeSDE/npde_state_sde.pkl',sess)
+    npOde = load_model('npODEeSDE/npde_state.pkl',sess)
 
     reference = REFERENCE_POSITION
     objective = Objective(REFERENCE_POSITION)
     print("Building...")
     sim = build_all(config, objective,
-                    reference, data, npde, sess)
+                    reference, data, npOde, npSde, sess)
     
     print("Simulation...")
     sim.simulate()

@@ -42,7 +42,7 @@ class SamplingBasedMPC:
     """
     Sampling-based MPC solver.
     """
-    def __init__(self, model: BaseModel, objective: BaseObjective, config: Config, npde, sess):
+    def __init__(self, model: BaseModel, objective: BaseObjective, config: Config, npOde, npSde, sess):
         """
         Initializes the solver with the model, the objective, configurations and initial guess.
         Parameters
@@ -61,9 +61,11 @@ class SamplingBasedMPC:
         self.config = config
 
         #for the npODE or npSDE
-        self.npde = npde
+        self.npOde = npOde
+        self.npSde = npSde
         self.sess = sess
-        self.t = np.arange(0, config.MPC.horizon * config.MPC.dt, config.MPC.dt)
+        
+        self.t = np.arange(config.MPC.dt, config.MPC.horizon * config.MPC.dt, config.MPC.dt)
         # Sampling time for discrete time model
         self.dt = config.MPC.dt
         # Control horizon of the MPC (steps)
@@ -210,7 +212,7 @@ class SamplingBasedMPC:
         control_vars_all = control_vars_all.at[:, :, [0,1]].set(jnp.zeros((100, 5, 2), dtype=self.dtype_general))
 
         x0 = jax.device_get(state.at[0,1]) # so che non da errori
-        #samples = self._compute_samples(x0)
+        mean, samples = self._compute_samples(x0)
 
         #samples = self.npde.sample(x00,self.t,self.config.MPC.num_parallel_computations)
         #samples = self.sess.run(samples)
@@ -251,15 +253,21 @@ class SamplingBasedMPC:
 
         return optimal_action, gains
     
-    def _compute_samples(self, x0):
-        """Esegue operazioni con NumPy al di fuori di JAX."""
-        x0 = jax.device_get(x0).block_until_ready()
-        x0_np = np.asarray(x0, dtype=np.float64)
+    def _compute_samples(self, last_input):
+        samples_in = jnp.zeros((self.num_parallel_computations, self.num_control_points, 2), dtype=self.dtype_general)
+        x0_np = np.asarray(last_input[:2], dtype=np.float64)
 
-        if x0_np.ndim == 0:  # Se è uno scalare, rendilo un array 2D
-            x0_np = x0_np.reshape((1, -1))
-        samples = self.npde.sample(x0_np, self.t, self.config.MPC.num_parallel_computations)
-        return self.sess.run(samples)
+        samples = self.npSde.sample(x0_np, self.t, self.config.MPC.num_parallel_computations)
+        samples_np = self.sess.run(samples)
+        assert samples_np.shape == samples_in.shape, f"Shape mismatch: {samples_np.shape} vs {samples_in.shape}"
+        samples_in = jnp.asarray(samples_np, dtype=self.dtype_general)
+        
+
+        #mean_np = self.npode.predict(self.last_input[:2],self.t) # questo potrebbe essere un array jax :D
+        #mean_np = self.sess.run(mean_np)
+        #mean_in = jnp.asarray(mean_np, dtype=self.dtype_general)
+        #convert samples in modo tale da vada su predicted_input
+        return samples_in 
     
     def command(self, state, reference, shift_guess=True, num_steps=1):
         """
@@ -287,6 +295,7 @@ class SamplingBasedMPC:
 
         best_control_vars = self.best_control_vars
         # maybe this loop should be jitted to actually be more efficient
+        pred_input_ode, pred_input_sde = self._compute_samples(self.last_input)
         for i in range(num_steps):
             best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars, self.master_key, self.gains)
             self.gains = gains

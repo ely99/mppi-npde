@@ -405,7 +405,7 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
     return system, solver
 
 def build_all(config: settings.Config, objective: BaseObjective, 
-              reference: jnp.array, data: Dataset, npde, sess,
+              reference: jnp.array, data: Dataset, npOde, npSde,  sess,
               custom_dynamics_fn: Optional[Callable] = None):
     system, x_init, state_init = (None, None, None)
     solver_dynamics_model_setting = config.solver_dynamics
@@ -425,7 +425,7 @@ def build_all(config: settings.Config, objective: BaseObjective,
     if config.solver_type != settings.Solver.MPPI:
         raise NotImplementedError
 
-    solver = SamplingBasedMPC(solver_dynamics_model, objective, config, npde, sess)
+    solver = SamplingBasedMPC(solver_dynamics_model, objective, config, npOde, npSde, sess)
     
     # dummy for jitting
     input_sequence = solver.command(solver_x_init, reference, False).block_until_ready()
