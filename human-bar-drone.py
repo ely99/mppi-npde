@@ -139,9 +139,9 @@ if __name__ == "__main__":
     sim.simulate()
     
     
-    #print("Saving Data json format")
-    #data.add_to_list_from_sim(sim)
-    #data.save_data_json()
+    print("Saving Data json format")
+    data.add_to_list_from_sim(sim)
+    data.save_data_json()
 
     #data.set_file_name(FILE_NAME)
     #print("Saving Data csv format")

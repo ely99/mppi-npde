@@ -11,7 +11,9 @@ from mpl_toolkits.mplot3d import Axes3D
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-SIMULATION_ID = 6
+print(jnp.arange(10))
+
+SIMULATION_ID = 1
 file_name = os.path.join('SIMULATION_DATA/', 'some_sim'+'.json') 
 #file_name = os.path.join('H-B-D/Generate_Dataset_HBD/DATASET/SIM0', 'data1'+'.json')
 
@@ -54,7 +56,7 @@ weight = np.array([[1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
 
 # PLOT THE DATA
 common_length = min(state_traj.shape[0], input_traj.shape[0])
-
+print(common_length)
 time_vect = Ts * jnp.arange(common_length)
 rep_ref = np.tile(reference, (common_length,1))
 state_traj_truncated = state_traj[:common_length] 
