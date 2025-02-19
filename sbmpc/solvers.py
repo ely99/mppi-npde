@@ -65,7 +65,7 @@ class SamplingBasedMPC:
         self.npSde = npSde
         self.sess = sess
         
-        self.t = np.arange(config.MPC.dt, config.MPC.horizon * config.MPC.dt, config.MPC.dt)
+        self.t = np.arange(config.MPC.dt, config.MPC.num_control_points * config.MPC.dt+config.MPC.dt, config.MPC.dt)
         # Sampling time for discrete time model
         self.dt = config.MPC.dt
         # Control horizon of the MPC (steps)
@@ -200,19 +200,19 @@ class SamplingBasedMPC:
 
         return cost, input_sequence
 
-    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains):
+    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains, pred_input_sde):
 
         additional_random_parameters = self.sample_input_sequence(key)
 
         if self.config.MPC.smoothing == "Spline":
             control_vars_all = best_control_vars[::self.control_points_sparsity, :] + additional_random_parameters
+            control_vars_all = control_vars_all.at[:, :, [0,1]].set(pred_input_sde)
         else:
             control_vars_all = best_control_vars + additional_random_parameters
         # here add the input predicted
-        control_vars_all = control_vars_all.at[:, :, [0,1]].set(jnp.zeros((100, 5, 2), dtype=self.dtype_general))
 
-        x0 = jax.device_get(state.at[0,1]) # so che non da errori
-        mean, samples = self._compute_samples(x0)
+        #x0 = jax.device_get(state.at[0,1]) # so che non da errori
+        #mean, samples = self._compute_samples(x0)
 
         #samples = self.npde.sample(x00,self.t,self.config.MPC.num_parallel_computations)
         #samples = self.sess.run(samples)
@@ -262,12 +262,13 @@ class SamplingBasedMPC:
         assert samples_np.shape == samples_in.shape, f"Shape mismatch: {samples_np.shape} vs {samples_in.shape}"
         samples_in = jnp.asarray(samples_np, dtype=self.dtype_general)
         
+        mean_in = jnp.zeros((self.num_control_points, 2), dtype=self.dtype_general)
+        mean_np = self.npOde.predict(self.last_input[:2], self.t) # questo potrebbe essere un array jax :D
+        mean_np = self.sess.run(mean_np)
+        assert mean_np.shape == mean_in.shape, f"Shape mismatch: {samples_np.shape} vs {samples_in.shape}"
+        mean_in = jnp.asarray(mean_np, dtype=self.dtype_general)
 
-        #mean_np = self.npode.predict(self.last_input[:2],self.t) # questo potrebbe essere un array jax :D
-        #mean_np = self.sess.run(mean_np)
-        #mean_in = jnp.asarray(mean_np, dtype=self.dtype_general)
-        #convert samples in modo tale da vada su predicted_input
-        return samples_in 
+        return mean_in, samples_in 
     
     def command(self, state, reference, shift_guess=True, num_steps=1):
         """
@@ -297,7 +298,7 @@ class SamplingBasedMPC:
         # maybe this loop should be jitted to actually be more efficient
         pred_input_ode, pred_input_sde = self._compute_samples(self.last_input)
         for i in range(num_steps):
-            best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars, self.master_key, self.gains)
+            best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars, self.master_key, self.gains, pred_input_sde)
             self.gains = gains
             # Below are the gains computed using the full jax autodiff instead of the more efficient formula
             # print("old gains", self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key, self.gains)[0][0])
